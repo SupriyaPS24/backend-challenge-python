@@ -1,3 +1,4 @@
+import datetime
 from typing import Tuple
 
 from sqlalchemy import select
@@ -23,6 +24,27 @@ def create_booking(db: Session, booking: schemas.BookingBase) -> models.Booking:
     return db_booking
 
 
+def is_unit_available(
+    db: Session,
+    unit_id: str,
+    check_in_date: datetime.date,
+    number_of_nights: int,
+    exclude_booking_id: int | None = None,
+) -> bool:
+    new_check_out = check_in_date + datetime.timedelta(days=number_of_nights)
+
+    query = select(models.Booking).where(models.Booking.unit_id == unit_id)
+    if exclude_booking_id is not None:
+        query = query.where(models.Booking.id != exclude_booking_id)
+
+    for existing in db.execute(query).scalars().all():
+        existing_check_out = existing.check_in_date + datetime.timedelta(days=existing.number_of_nights)
+        if existing.check_in_date < new_check_out and check_in_date < existing_check_out:
+            return False
+
+    return True
+
+
 def is_booking_possible(db: Session, booking: schemas.BookingBase) -> Tuple[bool, str]:
     # check 1 : The Same guest cannot book the same unit multiple times
     if db.execute(
@@ -39,13 +61,8 @@ def is_booking_possible(db: Session, booking: schemas.BookingBase) -> Tuple[bool
     ).scalars().first():
         return False, 'The same guest cannot be in multiple units at the same time'
 
-    # check 3 : Unit is available for the check-in date
-    if db.execute(
-        select(models.Booking).where(
-            models.Booking.check_in_date == booking.check_in_date,
-            models.Booking.unit_id == booking.unit_id,
-        )
-    ).scalars().first():
+    # check 3 : Unit is available for the full stay duration
+    if not is_unit_available(db, booking.unit_id, booking.check_in_date, booking.number_of_nights):
         return False, 'For the given check-in date, the unit is already occupied'
 
     return True, 'OK'
