@@ -66,3 +66,29 @@ def is_booking_possible(db: Session, booking: schemas.BookingBase) -> Tuple[bool
         return False, 'For the given check-in date, the unit is already occupied'
 
     return True, 'OK'
+
+
+def extend_booking(db: Session, booking_id: int, number_of_nights: int) -> models.Booking:
+    booking = db.get(models.Booking, booking_id)
+    if booking is None:
+        raise UnableToBook("Booking not found")
+
+    if number_of_nights < booking.number_of_nights:
+        raise UnableToBook("number_of_nights cannot be less than the current value")
+
+    if number_of_nights == booking.number_of_nights:
+        return booking
+
+    if not is_unit_available(
+        db,
+        unit_id=booking.unit_id,
+        check_in_date=booking.check_in_date,
+        number_of_nights=number_of_nights,
+        exclude_booking_id=booking.id,
+    ):
+        raise UnableToBook("The unit is not available for the extended period")
+
+    booking.number_of_nights = number_of_nights
+    db.commit()
+    db.refresh(booking)
+    return booking

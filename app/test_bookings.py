@@ -110,3 +110,87 @@ def test_different_guest_same_unit_booking_different_date(test_db):
     )
     assert response.status_code == 400, response.text
     assert response.json()['detail'] == 'For the given check-in date, the unit is already occupied'
+
+
+@pytest.mark.freeze_time('2023-05-21')
+def test_extend_stay_success(test_db):
+    response = client.post("/api/v1/booking", json=GUEST_A_UNIT_1)
+    booking_id = response.json()['id']
+
+    response = client.patch(
+        f"/api/v1/booking/{booking_id}/extend",
+        json={'number_of_nights': 8}
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()['number_of_nights'] == 8
+
+
+@pytest.mark.freeze_time('2023-05-21')
+def test_extend_stay_is_idempotent(test_db):
+    response = client.post("/api/v1/booking", json=GUEST_A_UNIT_1)
+    booking_id = response.json()['id']
+
+    for _ in range(3):
+        response = client.patch(
+            f"/api/v1/booking/{booking_id}/extend",
+            json={'number_of_nights': 7}
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()['number_of_nights'] == 7
+
+
+@pytest.mark.freeze_time('2023-05-21')
+def test_extend_stay_blocked_by_next_booking(test_db):
+    response = client.post("/api/v1/booking", json=GUEST_A_UNIT_1)
+    booking_id = response.json()['id']
+
+    # GuestB books unit 1 right after GuestA checks out
+    response = client.post(
+        "/api/v1/booking",
+        json={
+            'unit_id': '1',
+            'guest_name': 'GuestB',
+            'check_in_date': (datetime.date.today() + datetime.timedelta(days=5)).strftime('%Y-%m-%d'),
+            'number_of_nights': 3,
+        }
+    )
+    assert response.status_code == 200, response.text
+
+    response = client.patch(
+        f"/api/v1/booking/{booking_id}/extend",
+        json={'number_of_nights': 7}
+    )
+    assert response.status_code == 400, response.text
+    assert response.json()['detail'] == 'The unit is not available for the extended period'
+
+
+@pytest.mark.freeze_time('2023-05-21')
+def test_extend_stay_cannot_shorten(test_db):
+    response = client.post("/api/v1/booking", json=GUEST_A_UNIT_1)
+    booking_id = response.json()['id']
+
+    response = client.patch(
+        f"/api/v1/booking/{booking_id}/extend",
+        json={'number_of_nights': 3}
+    )
+    assert response.status_code == 400, response.text
+    assert response.json()['detail'] == 'number_of_nights cannot be less than the current value'
+
+
+@pytest.mark.freeze_time('2023-05-21')
+def test_extend_stay_not_found(test_db):
+    response = client.patch(
+        "/api/v1/booking/9999/extend",
+        json={'number_of_nights': 10}
+    )
+    assert response.status_code == 400, response.text
+    assert response.json()['detail'] == 'Booking not found'
+
+
+@pytest.mark.freeze_time('2023-05-21')
+def test_extend_stay_invalid_nights(test_db):
+    response = client.patch(
+        "/api/v1/booking/1/extend",
+        json={'number_of_nights': 0}
+    )
+    assert response.status_code == 422, response.text
